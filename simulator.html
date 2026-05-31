@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>x86ASM.dev — Симулятор</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:     #080b08;
+  --bg2:    #0d120d;
+  --bg3:    #111711;
+  --green:  #00ff41;
+  --green2: #00cc33;
+  --green3: #005918;
+  --amber:  #ffb000;
+  --red:    #ff3c3c;
+  --blue:   #5fafff;
+  --purple: #c792ea;
+  --dim:    #0d130d;
+  --border: #152115;
+  --text:   #c8ffc8;
+  --muted:  #3d6b3d;
+  --white:  #efffef;
+}
+
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Share Tech Mono',monospace;
+  font-size:13px;
+}
+
+/* scanlines */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);
+}
+
+/* ── NAV ── */
+nav{
+  height:50px;display:flex;align-items:center;
+  padding:0 14px;gap:12px;
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  flex-shrink:0;position:relative;z-index:100;
+}
+
+.nav-logo{
+  font-family:'VT323',monospace;font-size:22px;
+  color:var(--green);text-shadow:0 0 12px var(--green);
+  letter-spacing:2px;text-decoration:none;white-space:nowrap;
+}
+.nav-logo span{color:var(--amber);}
+
+.nav-back{
+  font-size:11px;color:var(--muted);text-decoration:none;
+  letter-spacing:.05em;padding:4px 10px;border:1px solid var(--border);
+  transition:all .15s;
+}
+.nav-back:hover{color:var(--green);border-color:var(--green3);}
+
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:14px;}
+
+.status-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--green);box-shadow:0 0 8px var(--green);
+  display:inline-block;margin-right:5px;
+  animation:blink 2s ease-in-out infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+.nav-status{font-size:11px;color:var(--muted);}
+#cycle-count{font-size:11px;color:var(--green3);}
+
+/* ── LAYOUT ── */
+.app{
+  display:grid;
+  grid-template-columns:1fr 248px;
+  grid-template-rows:1fr 130px;
+  height:calc(100vh - 50px);
+}
+
+/* ── EDITOR ── */
+.editor-panel{
+  grid-row:1/2;border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+
+.panel-hdr{
+  padding:6px 12px;background:var(--dim);
+  border-bottom:1px solid var(--border);
+  color:var(--muted);font-size:11px;
+  display:flex;align-items:center;gap:8px;
+  text-transform:uppercase;letter-spacing:.08em;
+  flex-shrink:0;
+}
+.panel-hdr .ico{color:var(--green3);}
+
+.editor-wrap{display:flex;flex:1;overflow:hidden;position:relative;}
+
+.line-numbers{
+  padding:10px 8px;color:var(--muted);text-align:right;
+  background:var(--bg);border-right:1px solid var(--border);
+  min-width:34px;font-size:12px;line-height:1.6;
+  user-select:none;overflow:hidden;flex-shrink:0;
+}
+.line-numbers .cur{color:var(--green);background:rgba(0,255,65,.1);}
+
+/* Syntax highlight overlay */
+.editor-scroller{
+  flex:1;position:relative;overflow:auto;
+}
+
+.highlight-layer{
+  position:absolute;top:0;left:0;
+  padding:10px 10px 10px 12px;
+  font-family:'Share Tech Mono',monospace;font-size:13px;
+  line-height:1.6;white-space:pre;
+  pointer-events:none;
+  color:transparent;
+  width:100%;min-height:100%;
+  tab-size:4;
+}
+
+textarea#code{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  background:transparent;
+  color:var(--text);
+  border:none;outline:none;resize:none;
+  padding:10px 10px 10px 12px;
+  font-family:'Share Tech Mono',monospace;font-size:13px;line-height:1.6;
+  caret-color:var(--green);tab-size:4;
+  white-space:pre;overflow-wrap:normal;overflow-x:auto;
+  spellcheck:false;
+}
+textarea#code::selection{background:rgba(0,255,65,.2);}
+
+/* Syntax colors */
+.hl-comment{color:#2d5e2d;}
+.hl-kw     {color:var(--green);text-shadow:0 0 6px rgba(0,255,65,.3);}
+.hl-reg    {color:var(--amber);}
+.hl-num    {color:#ff8c69;}
+.hl-label  {color:var(--blue);}
+.hl-str    {color:var(--purple);}
+
+/* Controls */
+.controls{
+  padding:8px 12px;border-top:1px solid var(--border);
+  display:flex;gap:7px;background:var(--bg2);
+  align-items:center;flex-wrap:wrap;flex-shrink:0;
+}
+
+button{
+  background:transparent;border:1px solid var(--green3);
+  color:var(--green);font-family:'Share Tech Mono',monospace;
+  font-size:11px;padding:5px 13px;cursor:pointer;
+  text-transform:uppercase;letter-spacing:.08em;transition:all .1s;
+  position:relative;overflow:hidden;
+}
+button::before{content:'';position:absolute;inset:0;background:var(--green);opacity:0;transition:opacity .1s;}
+button:hover{border-color:var(--green);color:var(--bg);box-shadow:0 0 10px var(--green3);}
+button:hover::before{opacity:1;}
+button span{position:relative;z-index:1;}
+button:disabled{opacity:.3;cursor:not-allowed;}
+button:disabled:hover::before{opacity:0;}
+button:disabled:hover{color:var(--green);border-color:var(--green3);box-shadow:none;}
+
+.btn-run{border-color:var(--green2);}
+.btn-run:hover::before{background:var(--green2);}
+.btn-step{border-color:var(--amber);color:var(--amber);}
+.btn-step:hover{color:var(--bg);}
+.btn-step:hover::before{background:var(--amber);}
+.btn-reset{border-color:var(--red);color:var(--red);}
+.btn-reset:hover{color:var(--bg);}
+.btn-reset:hover::before{background:var(--red);}
+
+#exec-status{margin-left:auto;font-size:11px;color:var(--muted);}
+
+select{
+  background:var(--bg2);border:1px solid var(--green3);
+  color:var(--green);font-family:'Share Tech Mono',monospace;
+  font-size:11px;padding:4px 7px;outline:none;cursor:pointer;
+}
+select option{background:var(--bg2);}
+
+/* ── RIGHT COL ── */
+.right-col{display:flex;flex-direction:column;overflow:hidden;}
+
+.registers-panel{border-bottom:1px solid var(--border);flex-shrink:0;}
+
+.reg-grid{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:1px;padding:6px;background:var(--bg);
+}
+.reg-item{
+  background:var(--bg2);padding:4px 7px;
+  display:flex;justify-content:space-between;align-items:center;
+  transition:background .2s;
+}
+.reg-item.changed{background:rgba(0,255,65,.12);animation:flash .4s ease;}
+@keyframes flash{0%{background:rgba(0,255,65,.35)}100%{background:rgba(0,255,65,.12)}}
+.reg-name{color:var(--muted);font-size:10px;text-transform:uppercase;}
+.reg-val{color:var(--green);font-size:11px;}
+
+.flags-row{display:flex;gap:5px;padding:5px 7px;border-top:1px solid var(--border);}
+.flag{padding:2px 5px;border:1px solid var(--border);font-size:9px;color:var(--muted);text-transform:uppercase;transition:all .2s;}
+.flag.set{border-color:var(--green3);color:var(--green);background:rgba(0,255,65,.1);text-shadow:0 0 6px var(--green3);}
+
+.stack-panel{border-bottom:1px solid var(--border);flex-shrink:0;}
+.stack-list{padding:5px 7px;max-height:90px;overflow-y:auto;}
+.stack-item{display:flex;justify-content:space-between;padding:2px 0;font-size:10px;border-bottom:1px solid rgba(21,33,21,.5);}
+.stack-addr{color:var(--muted);}
+.stack-val{color:var(--green2);}
+.stack-item.top .stack-addr,.stack-item.top .stack-val{color:var(--amber);}
+
+.output-panel{flex:1;overflow:hidden;display:flex;flex-direction:column;}
+.output-log{flex:1;overflow-y:auto;padding:7px;font-size:11px;line-height:1.7;}
+.log-line{color:var(--text);margin-bottom:1px;}
+.log-line.info{color:var(--muted);}
+.log-line.ok{color:var(--green2);}
+.log-line.warn{color:var(--amber);}
+.log-line.err{color:var(--red);}
+.log-line.step{color:var(--green);}
+
+/* ── BOTTOM ── */
+.bottom-bar{
+  grid-column:1/3;border-top:1px solid var(--border);
+  display:grid;grid-template-columns:1fr 280px;
+  flex-shrink:0;
+}
+
+.memory-panel{border-right:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;}
+.memory-grid{
+  flex:1;overflow-x:auto;overflow-y:hidden;
+  padding:5px 8px;display:flex;gap:2px;align-items:flex-start;
+}
+.mem-cell{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:34px;}
+.mem-addr{font-size:8px;color:var(--muted);}
+.mem-val{
+  width:30px;height:26px;background:var(--bg3);
+  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
+  font-size:10px;color:var(--text);transition:all .2s;
+}
+.mem-val.written{
+  background:rgba(0,255,65,.15);border-color:var(--green3);
+  color:var(--green);box-shadow:0 0 5px rgba(0,255,65,.2);
+  animation:flash .4s ease;
+}
+
+.tutorial-panel{padding:8px 12px;overflow-y:auto;font-size:11px;line-height:1.7;}
+.tutorial-panel h4{color:var(--amber);font-family:'VT323',monospace;font-size:16px;margin-bottom:3px;}
+.tutorial-panel p{color:var(--muted);margin-bottom:1px;}
+.tutorial-panel code{color:var(--green2);}
+
+/* scrollbars */
+::-webkit-scrollbar{width:3px;height:3px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--green3);}
+
+/* ══════════ MOBILE ══════════ */
+@media(max-width:700px){
+  html,body{overflow:auto;}
+
+  .app{
+    display:flex;flex-direction:column;
+    height:auto;overflow:visible;
+  }
+
+  .editor-panel{
+    height:50vh;min-height:300px;
+    grid-row:unset;border-right:none;
+    border-bottom:1px solid var(--border);
+  }
+
+  .right-col{
+    flex-direction:row;flex-wrap:wrap;
+    border-bottom:1px solid var(--border);
+  }
+
+  .registers-panel{flex:1;min-width:180px;border-bottom:none;border-right:1px solid var(--border);}
+  .stack-panel{flex:1;min-width:130px;border-bottom:none;}
+  .output-panel{width:100%;border-top:1px solid var(--border);min-height:120px;}
+
+  .bottom-bar{
+    grid-column:unset;
+    display:flex;flex-direction:column;
+  }
+
+  .memory-panel{border-right:none;border-bottom:1px solid var(--border);}
+  .tutorial-panel{display:none;}
+
+  nav .nav-status{display:none;}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-logo">x86<span>ASM</span>.dev</a>
+  <a href="index.html" class="nav-back">← Главная</a>
+  <div class="nav-right">
+    <span class="nav-status"><span class="status-dot"></span>SYSTEM READY</span>
+    <span id="cycle-count">CYCLES: 0</span>
+  </div>
+</nav>
+
+<div class="app">
+
+  <!-- EDITOR -->
+  <div class="editor-panel">
+    <div class="panel-hdr">
+      <span class="ico">▶</span> CODE EDITOR
+      <select id="examples" style="margin-left:auto" onchange="loadExample()">
+        <option value="">— примеры —</option>
+        <option value="hello">Арифметика</option>
+        <option value="loop">Цикл (LOOP)</option>
+        <option value="stack">Стек (PUSH/POP)</option>
+        <option value="cmp">Переходы (CMP/JMP)</option>
+        <option value="fib">Фибоначчи</option>
+      </select>
+    </div>
+    <div class="editor-wrap">
+      <div class="line-numbers" id="line-numbers">1</div>
+      <div class="editor-scroller" id="editorScroller">
+        <div class="highlight-layer" id="highlightLayer" aria-hidden="true"></div>
+        <textarea id="code" spellcheck="false" autocorrect="off" autocapitalize="off"
+          oninput="onCodeInput()" onkeydown="handleTab(event)" onscroll="syncScroll()"
+        >; Привет, ассемблер!
+; Базовая арифметика
+
+MOV AX, 10      ; AX = 10
+MOV BX, 20      ; BX = 20
+ADD AX, BX      ; AX = AX + BX
+MOV CX, AX      ; CX = 30
+SUB CX, 5       ; CX = 25
+MUL BX          ; DX:AX = AX * BX
+MOV DX, 0       ; сброс DX
+HLT             ; стоп</textarea>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn-run"  id="btn-run"  onclick="runAll()"><span>▶ Run</span></button>
+      <button class="btn-step" id="btn-step" onclick="stepOne()"><span>▷ Step</span></button>
+      <button onclick="resetSim()"><span>↺ Reset</span></button>
+      <button class="btn-reset" onclick="clearCode()"><span>✕ Clear</span></button>
+      <span id="exec-status">— остановлено —</span>
+    </div>
+  </div>
+
+  <!-- RIGHT COL -->
+  <div class="right-col">
+    <div class="registers-panel">
+      <div class="panel-hdr"><span class="ico">▣</span> РЕГИСТРЫ</div>
+      <div class="reg-grid" id="reg-grid"></div>
+      <div class="flags-row" id="flags-row"></div>
+    </div>
+
+    <div class="stack-panel">
+      <div class="panel-hdr"><span class="ico">↕</span> СТЕК <span style="margin-left:auto;font-size:10px">SP=<span id="sp-val">0xFFFF</span></span></div>
+      <div class="stack-list" id="stack-list">
+        <div class="log-line info" style="padding:3px 0">стек пуст</div>
+      </div>
+    </div>
+
+    <div class="output-panel">
+      <div class="panel-hdr"><span class="ico">≡</span> ЛОГ ВЫПОЛНЕНИЯ</div>
+      <div class="output-log" id="output-log">
+        <div class="log-line info">// Введите код и нажмите Run или Step</div>
+        <div class="log-line info">// MOV ADD SUB MUL DIV INC DEC</div>
+        <div class="log-line info">// PUSH POP CMP JMP JE JNE JL JG LOOP HLT</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM -->
+  <div class="bottom-bar">
+    <div class="memory-panel">
+      <div class="panel-hdr"><span class="ico">▦</span> ПАМЯТЬ (0x00 – 0x1F)</div>
+      <div class="memory-grid" id="memory-grid"></div>
+    </div>
+    <div class="tutorial-panel">
+      <h4>📖 Справка</h4>
+      <p><code>MOV dst, src</code> — загрузить значение</p>
+      <p><code>ADD / SUB dst, src</code> — сложение/вычит.</p>
+      <p><code>MUL src</code> — AX = AX × src</p>
+      <p><code>PUSH / POP reg</code> — стек</p>
+      <p><code>CMP a, b</code> — сравнить, флаги</p>
+      <p><code>JMP/JE/JNE/JL/JG label</code> — переход</p>
+      <p><code>LOOP label</code> — CX--, прыгнуть если ≠0</p>
+      <p><code>HLT</code> — остановить выполнение</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// SYNTAX HIGHLIGHTER
+// ═══════════════════════════════════════════════════════
+
+const KEYWORDS = new Set([
+  'MOV','ADD','SUB','MUL','DIV','INC','DEC',
+  'PUSH','POP','CMP','JMP','JE','JZ','JNE','JNZ',
+  'JL','JNGE','JG','JNLE','LOOP','NOP','HLT',
+]);
+
+const REGISTERS = new Set(['AX','BX','CX','DX','SI','DI','SP','BP']);
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function highlightLine(line) {
+  // Separate comment
+  const cIdx = line.indexOf(';');
+  let code = cIdx >= 0 ? line.slice(0, cIdx) : line;
+  const comment = cIdx >= 0 ? line.slice(cIdx) : '';
+
+  // Tokenize code part
+  let result = '';
+  // We'll do a simple token-by-token pass
+  const tokens = code.split(/(\s+|,)/);
+  tokens.forEach(tok => {
+    if (!tok) return;
+    if (/^\s+$/.test(tok) || tok === ',') { result += escapeHtml(tok); return; }
+    const upper = tok.toUpperCase().replace(/:$/, '');
+    if (KEYWORDS.has(upper) && !tok.endsWith(':')) {
+      result += `<span class="hl-kw">${escapeHtml(tok)}</span>`;
+    } else if (REGISTERS.has(upper)) {
+      result += `<span class="hl-reg">${escapeHtml(tok)}</span>`;
+    } else if (/^-?0[xX][0-9a-fA-F]+$/.test(tok) || /^-?\d+$/.test(tok)) {
+      result += `<span class="hl-num">${escapeHtml(tok)}</span>`;
+    } else if (tok.endsWith(':')) {
+      result += `<span class="hl-label">${escapeHtml(tok)}</span>`;
+    } else if (/^[A-Za-z_]\w*$/.test(tok)) {
+      // likely a label reference
+      result += `<span class="hl-label">${escapeHtml(tok)}</span>`;
+    } else {
+      result += escapeHtml(tok);
+    }
+  });
+
+  if (comment) {
+    result += `<span class="hl-comment">${escapeHtml(comment)}</span>`;
+  }
+
+  return result;
+}
+
+function applyHighlight() {
+  const code = document.getElementById('code').value;
+  const lines = code.split('\n');
+  const html = lines.map(highlightLine).join('\n');
+  document.getElementById('highlightLayer').innerHTML = html;
+}
+
+function syncScroll() {
+  const ta = document.getElementById('code');
+  const hl = document.getElementById('highlightLayer');
+  hl.style.transform = `translateY(-${ta.scrollTop}px) translateX(-${ta.scrollLeft}px)`;
+}
+
+function onCodeInput() {
+  updateLineNumbers();
+  applyHighlight();
+}
+
+// ═══════════════════════════════════════════════════════
+// SIMULATOR CORE
+// ═══════════════════════════════════════════════════════
+
+const REGS = ['AX','BX','CX','DX','SI','DI','SP','BP'];
+const FLAGS_LIST = ['ZF','SF','CF','OF'];
+
+let state = {
+  regs: { AX:0,BX:0,CX:0,DX:0,SI:0,DI:0,SP:0xFFFF,BP:0 },
+  flags: { ZF:0,SF:0,CF:0,OF:0 },
+  memory: new Array(32).fill(0),
+  stack: [], ip: 0, halted: false, cycles: 0,
+  labels: {}, instructions: [],
+  prevRegs: {}, prevMem: new Array(32).fill(0),
+};
+
+let runInterval = null;
+
+function parseCode(src) {
+  const lines = src.split('\n');
+  const instructions = [];
+  const labels = {};
+  lines.forEach((line, idx) => {
+    const stripped = line.replace(/;.*$/, '').trim();
+    if (!stripped) { instructions.push({ type:'EMPTY', src:line, lineIdx:idx }); return; }
+    const lm = stripped.match(/^([A-Za-z_]\w*)\s*:(.*)$/);
+    if (lm) {
+      const lname = lm[1].toUpperCase();
+      const rest = lm[2].trim();
+      labels[lname] = instructions.length;
+      if (rest) {
+        const p = parseInstruction(rest, idx);
+        if (p) { p.src = line; instructions.push(p); }
+        else instructions.push({ type:'EMPTY', src:line, lineIdx:idx });
+      } else {
+        instructions.push({ type:'LABEL', name:lname, src:line, lineIdx:idx });
+      }
+      return;
+    }
+    const p = parseInstruction(stripped, idx);
+    if (p) { p.src = line; instructions.push(p); }
+    else instructions.push({ type:'UNKNOWN', src:stripped, lineIdx:idx });
+  });
+  return { instructions, labels };
+}
+
+function parseInstruction(s, lineIdx) {
+  const parts = s.split(/[\s,]+/).filter(Boolean);
+  if (!parts.length) return null;
+  const op = parts[0].toUpperCase();
+  const args = parts.slice(1).map(a => a.toUpperCase());
+  return { type:op, args, lineIdx };
+}
+
+function resolveVal(arg, regs) {
+  if (!arg) return 0;
+  if (REGS.includes(arg)) return regs[arg] & 0xFFFF;
+  if (arg.startsWith('0X')) return parseInt(arg, 16) & 0xFFFF;
+  const n = parseInt(arg);
+  if (!isNaN(n)) return ((n % 65536) + 65536) % 65536;
+  return 0;
+}
+
+function updateFlags(result, state) {
+  const r = ((result % 65536) + 65536) % 65536;
+  state.flags.ZF = r === 0 ? 1 : 0;
+  state.flags.SF = (r & 0x8000) ? 1 : 0;
+  state.flags.CF = (result < 0 || result > 0xFFFF) ? 1 : 0;
+  state.flags.OF = (result > 32767 || result < -32768) ? 1 : 0;
+}
+
+function execInstruction(instr, state) {
+  const { type, args } = instr;
+  const r = state.regs;
+  const f = state.flags;
+  let log = null;
+  let advance = true;
+
+  switch(type) {
+    case 'EMPTY': case 'LABEL': case 'NOP': break;
+    case 'UNKNOWN': return { ok:false, log:`Неизвестная инструкция: ${instr.src}` };
+
+    case 'MOV': {
+      const val = resolveVal(args[1], r);
+      if (REGS.includes(args[0])) { r[args[0]] = val & 0xFFFF; log = `MOV ${args[0]}, ${val} → ${args[0]}=${toHex(val)}`; }
+      else return { ok:false, log:`MOV: неверный операнд ${args[0]}` };
+      break;
+    }
+    case 'ADD': {
+      const a = resolveVal(args[0], r), b = resolveVal(args[1], r), res = a + b;
+      r[args[0]] = res & 0xFFFF; updateFlags(res, state);
+      log = `ADD ${args[0]}, ${b} → ${args[0]}=${toHex(r[args[0]])}`; break;
+    }
+    case 'SUB': {
+      const a = resolveVal(args[0], r), b = resolveVal(args[1], r), res = a - b;
+      r[args[0]] = ((res % 65536) + 65536) % 65536; updateFlags(res, state);
+      log = `SUB ${args[0]}, ${b} → ${args[0]}=${toHex(r[args[0]])}`; break;
+    }
+    case 'INC': {
+      const a = resolveVal(args[0], r), res = a + 1;
+      r[args[0]] = res & 0xFFFF; updateFlags(res, state);
+      log = `INC ${args[0]} → ${toHex(r[args[0]])}`; break;
+    }
+    case 'DEC': {
+      const a = resolveVal(args[0], r), res = a - 1;
+      r[args[0]] = ((res % 65536) + 65536) % 65536; updateFlags(res, state);
+      log = `DEC ${args[0]} → ${toHex(r[args[0]])}`; break;
+    }
+    case 'MUL': {
+      const b = resolveVal(args[0], r), res = (r.AX * b) & 0xFFFFFFFF;
+      r.AX = res & 0xFFFF; r.DX = (res >> 16) & 0xFFFF;
+      f.CF = f.OF = r.DX !== 0 ? 1 : 0;
+      log = `MUL ${args[0]} → DX:AX=${toHex(r.DX)}:${toHex(r.AX)}`; break;
+    }
+    case 'DIV': {
+      const b = resolveVal(args[0], r);
+      if (b === 0) return { ok:false, log:'DIV: деление на ноль!' };
+      const dividend = (r.DX << 16) | r.AX;
+      r.AX = Math.floor(dividend / b) & 0xFFFF; r.DX = dividend % b;
+      log = `DIV ${args[0]} → AX=${toHex(r.AX)} DX=${toHex(r.DX)}`; break;
+    }
+    case 'PUSH': {
+      const val = resolveVal(args[0], r);
+      state.stack.push(val); r.SP = Math.max(0, r.SP - 2);
+      const addr = Math.floor((0xFFFF - r.SP) / 2) % 16;
+      if (addr < state.memory.length) state.memory[addr] = val & 0xFF;
+      log = `PUSH ${args[0]}=${toHex(val)} → стек[${state.stack.length}]`; break;
+    }
+    case 'POP': {
+      if (state.stack.length === 0) return { ok:false, log:'POP: стек пуст!' };
+      const val = state.stack.pop();
+      if (REGS.includes(args[0])) r[args[0]] = val & 0xFFFF;
+      r.SP = Math.min(0xFFFF, r.SP + 2);
+      log = `POP → ${args[0]}=${toHex(val)}`; break;
+    }
+    case 'CMP': {
+      const a = resolveVal(args[0], r), b = resolveVal(args[1], r), res = a - b;
+      updateFlags(res, state);
+      log = `CMP ${args[0]},${args[1]} (${a}-${b}=${res}) ZF=${f.ZF} SF=${f.SF}`; break;
+    }
+    case 'JMP': {
+      const lbl = args[0];
+      if (state.labels[lbl] !== undefined) { state.ip = state.labels[lbl]; log = `JMP → ${lbl}`; advance = false; }
+      else return { ok:false, log:`JMP: метка ${lbl} не найдена` }; break;
+    }
+    case 'JE': case 'JZ': {
+      const lbl = args[0];
+      if (f.ZF) {
+        if (state.labels[lbl] !== undefined) { state.ip = state.labels[lbl]; advance = false; log = `JE → ${lbl} (ZF=1)`; }
+        else return { ok:false, log:`JE: метка ${lbl} не найдена` };
+      } else log = `JE пропущен (ZF=0)`; break;
+    }
+    case 'JNE': case 'JNZ': {
+      const lbl = args[0];
+      if (!f.ZF) {
+        if (state.labels[lbl] !== undefined) { state.ip = state.labels[lbl]; advance = false; log = `JNE → ${lbl} (ZF=0)`; }
+        else return { ok:false, log:`JNE: метка ${lbl} не найдена` };
+      } else log = `JNE пропущен (ZF=1)`; break;
+    }
+    case 'JL': case 'JNGE': {
+      const lbl = args[0];
+      if (f.SF !== f.OF) {
+        if (state.labels[lbl] !== undefined) { state.ip = state.labels[lbl]; advance = false; log = `JL → ${lbl}`; }
+        else return { ok:false, log:`JL: метка не найдена` };
+      } else log = `JL пропущен`; break;
+    }
+    case 'JG': case 'JNLE': {
+      const lbl = args[0];
+      if (!f.ZF && f.SF === f.OF) {
+        if (state.labels[lbl] !== undefined) { state.ip = state.labels[lbl]; advance = false; log = `JG → ${lbl}`; }
+        else return { ok:false, log:`JG: метка не найдена` };
+      } else log = `JG пропущен`; break;
+    }
+    case 'LOOP': {
+      const lbl = args[0];
+      r.CX = (r.CX - 1 + 65536) % 65536;
+      if (r.CX !== 0) {
+        if (state.labels[lbl] !== undefined) { state.ip = state.labels[lbl]; advance = false; log = `LOOP → ${lbl} (CX=${r.CX})`; }
+        else return { ok:false, log:`LOOP: метка ${lbl} не найдена` };
+      } else log = `LOOP завершён (CX=0)`; break;
+    }
+    case 'HLT': state.halted = true; log = '─── HLT: выполнение завершено ───'; break;
+    default: return { ok:false, log:`Неизвестная инструкция: ${type}` };
+  }
+
+  if (advance) state.ip++;
+  state.cycles++;
+  return { ok:true, log };
+}
+
+// ═══ HELPERS ══════════════════════════════════════════
+
+function toHex(v) {
+  return '0x' + ((v & 0xFFFF) >>> 0).toString(16).toUpperCase().padStart(4,'0');
+}
+
+function addLog(msg, cls = 'log-line') {
+  const log = document.getElementById('output-log');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function initState() {
+  const { instructions, labels } = parseCode(document.getElementById('code').value);
+  state.regs = { AX:0,BX:0,CX:0,DX:0,SI:0,DI:0,SP:0xFFFF,BP:0 };
+  state.flags = { ZF:0,SF:0,CF:0,OF:0 };
+  state.memory = new Array(32).fill(0);
+  state.stack = []; state.ip = 0; state.halted = false; state.cycles = 0;
+  state.labels = labels; state.instructions = instructions;
+  state.prevRegs = { ...state.regs }; state.prevMem = [...state.memory];
+}
+
+// ═══ UI ═══════════════════════════════════════════════
+
+function renderRegisters() {
+  const grid = document.getElementById('reg-grid');
+  grid.innerHTML = '';
+  REGS.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'reg-item' + (state.regs[r] !== state.prevRegs[r] ? ' changed' : '');
+    div.innerHTML = `<span class="reg-name">${r}</span><span class="reg-val">${toHex(state.regs[r])}</span>`;
+    grid.appendChild(div);
+  });
+  const fr = document.getElementById('flags-row');
+  fr.innerHTML = '';
+  FLAGS_LIST.forEach(fl => {
+    const span = document.createElement('span');
+    span.className = 'flag' + (state.flags[fl] ? ' set' : '');
+    span.textContent = fl;
+    fr.appendChild(span);
+  });
+  document.getElementById('sp-val').textContent = toHex(state.regs.SP);
+  document.getElementById('cycle-count').textContent = `CYCLES: ${state.cycles}`;
+}
+
+function renderStack() {
+  const el = document.getElementById('stack-list');
+  if (state.stack.length === 0) { el.innerHTML = '<div class="log-line info" style="padding:3px 0">стек пуст</div>'; return; }
+  el.innerHTML = '';
+  for (let i = state.stack.length - 1; i >= 0; i--) {
+    const div = document.createElement('div');
+    div.className = 'stack-item' + (i === state.stack.length - 1 ? ' top' : '');
+    const addr = 0xFFFF - (state.stack.length - 1 - i) * 2;
+    div.innerHTML = `<span class="stack-addr">${toHex(addr)}</span><span class="stack-val">${toHex(state.stack[i])}</span>`;
+    el.appendChild(div);
+  }
+}
+
+function renderMemory() {
+  const grid = document.getElementById('memory-grid');
+  grid.innerHTML = '';
+  for (let i = 0; i < 32; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'mem-cell';
+    const changed = state.memory[i] !== state.prevMem[i];
+    cell.innerHTML = `<div class="mem-addr">${i.toString(16).toUpperCase().padStart(2,'0')}</div><div class="mem-val${changed?' written':''}">${state.memory[i].toString(16).toUpperCase().padStart(2,'0')}</div>`;
+    grid.appendChild(cell);
+  }
+}
+
+function highlightCurrentLine() {
+  const code = document.getElementById('code').value;
+  const lines = code.split('\n');
+  let currentLine = -1;
+  if (state.instructions[state.ip]) currentLine = state.instructions[state.ip].lineIdx;
+  const lnEl = document.getElementById('line-numbers');
+  lnEl.innerHTML = '';
+  lines.forEach((_, i) => {
+    const span = document.createElement('div');
+    span.textContent = i + 1;
+    if (i === currentLine) span.className = 'cur';
+    lnEl.appendChild(span);
+  });
+}
+
+function renderAll() {
+  renderRegisters(); renderStack(); renderMemory(); highlightCurrentLine();
+}
+
+function updateLineNumbers() {
+  const code = document.getElementById('code').value;
+  const lines = code.split('\n');
+  const lnEl = document.getElementById('line-numbers');
+  lnEl.innerHTML = '';
+  lines.forEach((_, i) => {
+    const div = document.createElement('div');
+    div.textContent = i + 1;
+    lnEl.appendChild(div);
+  });
+}
+
+// ═══ CONTROLS ═════════════════════════════════════════
+
+function resetSim() {
+  if (runInterval) { clearInterval(runInterval); runInterval = null; }
+  initState();
+  document.getElementById('output-log').innerHTML = '';
+  addLog('// Симулятор сброшен', 'log-line info');
+  document.getElementById('exec-status').textContent = '— сброс —';
+  renderAll();
+  document.getElementById('btn-step').disabled = false;
+  document.getElementById('btn-run').disabled = false;
+}
+
+function stepOne() {
+  if (state.ip === 0 && state.cycles === 0) {
+    initState();
+    document.getElementById('output-log').innerHTML = '';
+    addLog(`// Начало выполнения (${state.instructions.length} инструкций)`, 'log-line info');
+  }
+  state.prevRegs = { ...state.regs };
+  state.prevMem = [...state.memory];
+
+  if (state.halted) { addLog('// Уже остановлено (HLT)', 'log-line warn'); return; }
+  if (state.ip >= state.instructions.length) {
+    state.halted = true;
+    addLog('// Конец программы', 'log-line ok');
+    document.getElementById('exec-status').textContent = '✓ завершено';
+    renderAll(); return;
+  }
+
+  const instr = state.instructions[state.ip];
+  const result = execInstruction(instr, state);
+  const lineNum = instr.lineIdx + 1;
+  if (result.ok) {
+    if (result.log) addLog(`[${state.cycles}] L${lineNum}: ${result.log}`, 'log-line step');
+  } else {
+    addLog(`✕ L${lineNum}: ${result.log}`, 'log-line err');
+    state.halted = true;
+    if (runInterval) { clearInterval(runInterval); runInterval = null; }
+    document.getElementById('exec-status').textContent = '✕ ошибка';
+  }
+  document.getElementById('exec-status').textContent = `IP=${state.ip} / цикл ${state.cycles}`;
+  renderAll();
+  if (state.halted) {
+    if (runInterval) { clearInterval(runInterval); runInterval = null; }
+    document.getElementById('exec-status').textContent = '✓ завершено';
+  }
+}
+
+function runAll() {
+  if (runInterval) { clearInterval(runInterval); runInterval = null; }
+  resetSim();
+  addLog('// ▶ Автовыполнение...', 'log-line ok');
+  runInterval = setInterval(() => {
+    stepOne();
+    if (state.halted || state.ip >= state.instructions.length) { clearInterval(runInterval); runInterval = null; }
+  }, 120);
+}
+
+function clearCode() {
+  document.getElementById('code').value = '';
+  document.getElementById('highlightLayer').innerHTML = '';
+  updateLineNumbers();
+}
+
+function handleTab(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const ta = e.target, start = ta.selectionStart;
+    ta.value = ta.value.slice(0, start) + '    ' + ta.value.slice(ta.selectionEnd);
+    ta.selectionStart = ta.selectionEnd = start + 4;
+    applyHighlight();
+  }
+}
+
+// ═══ EXAMPLES ═════════════════════════════════════════
+
+const EXAMPLES = {
+  hello: `; Арифметические операции
+MOV AX, 42     ; AX = 42
+MOV BX, 8      ; BX = 8
+ADD AX, BX     ; AX = 50
+SUB BX, 3      ; BX = 5
+MUL BX         ; AX = AX * BX = 250
+INC AX         ; AX = 251
+DEC BX         ; BX = 4
+HLT`,
+
+  loop: `; Сумма 1..10 через LOOP
+; CX = счётчик, AX = сумма
+MOV AX, 0      ; сумма = 0
+MOV CX, 10     ; счётчик = 10
+MOV BX, 0      ; текущее число
+
+START:
+INC BX          ; BX++
+ADD AX, BX      ; AX += BX
+LOOP START      ; CX--; если CX≠0 → START
+
+; AX = 55 (1+2+...+10)
+HLT`,
+
+  stack: `; Работа со стеком
+MOV AX, 0x1234
+MOV BX, 0xABCD
+MOV CX, 0x5678
+
+PUSH AX         ; сохранили AX
+PUSH BX         ; сохранили BX
+PUSH CX         ; сохранили CX
+
+MOV AX, 0      ; затёрли регистры
+MOV BX, 0
+MOV CX, 0
+
+POP CX          ; восстановили в обратном порядке
+POP BX
+POP AX
+
+HLT`,
+
+  cmp: `; Сравнение и переходы
+MOV AX, 15
+MOV BX, 20
+
+CMP AX, BX      ; AX < BX?
+JL  LESS        ; если меньше → LESS
+JMP DONE
+
+LESS:
+MOV CX, 1       ; CX=1: AX < BX
+JMP DONE
+
+DONE:
+MOV DX, 0xFF   ; маркер конца
+HLT`,
+
+  fib: `; Числа Фибоначчи (первые 8)
+; AX = F(n-1), BX = F(n), CX = счётчик
+MOV AX, 0      ; F(0)
+MOV BX, 1      ; F(1)
+MOV CX, 6      ; ещё 6 итераций
+
+NEXT:
+MOV DX, BX     ; DX = F(n)
+ADD BX, AX     ; BX = F(n+1)
+MOV AX, DX     ; AX = старый F(n)
+LOOP NEXT
+
+; BX = 21 (8-е число Фибоначчи)
+HLT`,
+};
+
+function loadExample() {
+  const key = document.getElementById('examples').value;
+  if (!key) return;
+  document.getElementById('code').value = EXAMPLES[key];
+  document.getElementById('examples').value = '';
+  onCodeInput();
+  resetSim();
+}
+
+// ═══ INIT ═════════════════════════════════════════════
+onCodeInput();
+initState();
+renderAll();
+addLog('// x86 ASM Simulator готов', 'log-line ok');
+addLog('// Выберите пример или напишите свой код', 'log-line info');
+</script>
+</body>
+</html>
