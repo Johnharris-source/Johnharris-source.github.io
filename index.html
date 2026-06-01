@@ -39,6 +39,21 @@ body::before{
 }
 
 /* ══════════ NAV ══════════ */
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">x86<span>ASM</span>.dev</div>
+  <div class="nav-links" id="navLinks">
+    <a href="#features">Возможности</a>
+    <a href="#instructions">Инструкции</a>
+    <a href="#examples">Примеры</a>
+    <!-- Добавленная ссылка на задачи -->
+    <a href="exercises.html">Задачи</a> 
+    <a href="simulator.html" class="nav-cta">▶ Запустить</a>
+  </div>
+  <div class="hamburger" id="hamburger" onclick="toggleMenu()">
+    <span></span><span></span><span></span>
+  </div>
+</nav>
 nav{
   position:fixed;top:0;left:0;right:0;z-index:1000;
   padding:0 clamp(16px,4vw,60px);
